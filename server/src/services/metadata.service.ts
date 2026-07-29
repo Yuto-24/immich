@@ -14,6 +14,7 @@ import {
   AssetFileType,
   AssetType,
   AssetVisibility,
+  CaptureTimeSource,
   ChecksumAlgorithm,
   DatabaseLock,
   ExifOrientation,
@@ -36,6 +37,7 @@ import { isAssetChecksumConstraint } from 'src/utils/database';
 import { mergeTimeZone } from 'src/utils/date';
 import { mimeTypes } from 'src/utils/mime-types';
 import { isFaceImportEnabled } from 'src/utils/misc';
+import { classifyAssetProvenance } from 'src/utils/provenance';
 import { upsertTags } from 'src/utils/tag';
 import { Tasks } from 'src/utils/tasks';
 
@@ -127,6 +129,47 @@ const getLensModel = (exifTags: ImmichTags): string | null => {
     return null;
   }
   return lensModel || null;
+};
+
+const getTagString = (value: unknown): string | null => {
+  if (typeof value === 'string') {
+    return value.trim() || null;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return null;
+};
+
+const getXmpHistory = (...values: unknown[]): string[] => {
+  const entries: string[] = [];
+  const visit = (value: unknown, key?: string) => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item, key);
+      }
+      return;
+    }
+
+    if (value && typeof value === 'object') {
+      for (const [childKey, childValue] of Object.entries(value)) {
+        visit(childValue, childKey);
+      }
+      return;
+    }
+
+    const text = getTagString(value);
+    if (text) {
+      entries.push(key ? `${key}: ${text}` : text);
+    }
+  };
+
+  for (const value of values) {
+    visit(value);
+  }
+  return [...new Set(entries)].slice(0, 50);
 };
 
 type ImmichTagsWithFaces = ImmichTags & { RegionInfo: NonNullable<ImmichTags['RegionInfo']> };
@@ -243,14 +286,30 @@ export class MetadataService extends BaseService {
       return;
     }
 
-    const [exifResult, stats] = await Promise.all([
+    const [exifResult, stats, lockedProperties] = await Promise.all([
       this.getExifTags(asset),
       this.storageRepository.stat(asset.originalPath),
+      this.assetJobRepository.getLockedPropertiesForMetadataExtraction(asset.id),
     ]);
-    const { tags: exifTags, audio, video, packets, format } = exifResult;
+    const { tags: exifTags, audio, video, packets, format, sidecarDateTag } = exifResult;
     this.logger.verbose('Exif Tags', exifTags);
 
     const dates = this.getDates(asset, exifTags, stats);
+    const captureDate = firstDateTime(exifTags);
+    let captureTimeSource = CaptureTimeSource.Filesystem;
+    let captureTimeTag = captureDate ? String(captureDate.tag) : null;
+    if (lockedProperties.includes('dateTimeOriginal')) {
+      captureTimeSource = CaptureTimeSource.Manual;
+      captureTimeTag = 'lockedProperties.dateTimeOriginal';
+    } else if (sidecarDateTag) {
+      captureTimeSource = CaptureTimeSource.XmpSidecar;
+      captureTimeTag = String(sidecarDateTag);
+    } else if (captureDate) {
+      captureTimeSource =
+        asset.type === AssetType.Video || ['CreationDate', 'MediaCreateDate'].includes(String(captureDate.tag))
+          ? CaptureTimeSource.EmbeddedQuickTime
+          : CaptureTimeSource.EmbeddedExif;
+    }
 
     const { width, height } = this.getImageDimensions(exifTags);
     let geo: ReverseGeocodeResult = { country: null, state: null, city: null },
@@ -365,6 +424,35 @@ export class MetadataService extends BaseService {
     const assetWidth = isSidewards ? validate(height) : validate(width);
     const assetHeight = isSidewards ? validate(width) : validate(height);
 
+    const provenanceData = classifyAssetProvenance({
+      assetId: asset.id,
+      originalFileName: asset.originalFileName,
+      originalMimeType: mimeTypes.lookup(asset.originalFileName),
+      width: assetWidth,
+      height: assetHeight,
+      make: getTagString(
+        exifTags.Make ?? exifTags.Device?.Manufacturer ?? exifTags.AndroidMake ?? exifTags.DeviceManufacturer,
+      ),
+      model: getTagString(
+        exifTags.Model ?? exifTags.Device?.ModelName ?? exifTags.AndroidModel ?? exifTags.DeviceModelName,
+      ),
+      iso: validate(exifTags.ISO) as number | null,
+      exposureTime: getTagString(exifTags.ExposureTime),
+      fNumber: validate(exifTags.FNumber),
+      focalLength: validate(exifTags.FocalLength),
+      lensModel: getLensModel(exifTags),
+      isRaw: mimeTypes.isRaw(asset.originalFileName),
+      captureTimeSource,
+      captureTimeTag,
+      software: getTagString(exifTags.Software),
+      processingSoftware: getTagString(exifTags.ProcessingSoftware),
+      creatorTool: getTagString(exifTags.CreatorTool),
+      documentId: getTagString(exifTags.DocumentID),
+      originalDocumentId: getTagString(exifTags.OriginalDocumentID),
+      instanceId: getTagString(exifTags.InstanceID),
+      xmpHistory: getXmpHistory(exifTags.History, exifTags.HistoryAction),
+    });
+
     const tasks = new Tasks();
 
     tasks.push(
@@ -390,6 +478,7 @@ export class MetadataService extends BaseService {
         });
         await this.applyTagList(asset);
       },
+      () => this.assetRepository.upsertProvenance(provenanceData),
     );
 
     if (this.isMotionPhoto(asset, exifTags)) {
@@ -587,10 +676,11 @@ export class MetadataService extends BaseService {
       shouldProbe ? this.getVideoTags(asset.originalPath) : null,
     ]);
 
+    const sidecarDateTag = sidecarTags ? (firstDateTime(sidecarTags)?.tag ?? null) : null;
+
     // prefer dates from sidecar tags
     if (sidecarTags) {
-      const result = firstDateTime(sidecarTags);
-      const sidecarDate = result?.dateTime;
+      const sidecarDate = sidecarDateTag ? firstDateTime(sidecarTags)?.dateTime : null;
       if (sidecarDate) {
         for (const tag of EXIF_DATE_TAGS) {
           delete mediaTags[tag];
@@ -633,6 +723,7 @@ export class MetadataService extends BaseService {
       video: videoResult?.video,
       packets: videoResult?.packets,
       format: videoResult?.format ?? null,
+      sidecarDateTag,
     };
   }
 

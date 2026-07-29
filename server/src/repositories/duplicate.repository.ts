@@ -9,10 +9,15 @@ import { AssetType, VectorIndex } from 'src/enum';
 import { probes } from 'src/repositories/database.repository';
 import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
+import { AssetProvenanceTable } from 'src/schema/tables/asset-provenance.table';
 import { anyUuid, asUuid, withDefaultVisibility } from 'src/utils/database';
 
 // Maximum number of candidate duplicates to return from vector search
 const DUPLICATE_SEARCH_LIMIT = 64;
+
+export type DuplicateAsset = MapAsset & {
+  provenanceInfo?: ShallowDehydrateObject<Selectable<AssetProvenanceTable>> | null;
+};
 
 interface DuplicateSearch {
   assetId: string;
@@ -48,12 +53,19 @@ export class DuplicateRepository {
               (qb) =>
                 qb
                   .selectFrom('asset_exif')
+                  .leftJoin('asset_provenance', 'asset_provenance.assetId', 'asset.id')
                   .selectAll('asset')
                   .select((eb) =>
                     eb.fn
                       .toJson('asset_exif')
                       .$castTo<ShallowDehydrateObject<Selectable<AssetExifTable>>>()
                       .as('exifInfo'),
+                  )
+                  .select((eb) =>
+                    eb.fn
+                      .toJson('asset_provenance')
+                      .$castTo<ShallowDehydrateObject<Selectable<AssetProvenanceTable>> | null>()
+                      .as('provenanceInfo'),
                   )
 
                   .select((eb) =>
@@ -71,7 +83,7 @@ export class DuplicateRepository {
             )
             .select('asset.duplicateId')
             .select((eb) =>
-              eb.fn.jsonAgg('asset2').orderBy('asset.localDateTime', 'asc').$castTo<MapAsset[]>().as('assets'),
+              eb.fn.jsonAgg('asset2').orderBy('asset.localDateTime', 'asc').$castTo<DuplicateAsset[]>().as('assets'),
             )
             .where('asset.ownerId', '=', asUuid(userId))
             .where('asset.duplicateId', 'is not', null)
@@ -112,7 +124,7 @@ export class DuplicateRepository {
   }
 
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
-  async get(duplicateId: string): Promise<{ duplicateId: string; assets: MapAsset[] } | undefined> {
+  async get(duplicateId: string): Promise<{ duplicateId: string; assets: DuplicateAsset[] } | undefined> {
     const result = await this.db
       .selectFrom('asset')
       .$call(withDefaultVisibility)
@@ -124,8 +136,10 @@ export class DuplicateRepository {
         (qb) =>
           qb
             .selectFrom('asset_exif')
+            .leftJoin('asset_provenance', 'asset_provenance.assetId', 'asset.id')
             .selectAll('asset')
             .select((eb) => eb.fn.toJson('asset_exif').as('exifInfo'))
+            .select((eb) => eb.fn.toJson('asset_provenance').as('provenanceInfo'))
             .select((eb) =>
               jsonArrayFrom(
                 eb
@@ -140,7 +154,9 @@ export class DuplicateRepository {
         (join) => join.onTrue(),
       )
       .select('asset.duplicateId')
-      .select((eb) => eb.fn.jsonAgg('asset2').orderBy('asset.localDateTime', 'asc').$castTo<MapAsset[]>().as('assets'))
+      .select((eb) =>
+        eb.fn.jsonAgg('asset2').orderBy('asset.localDateTime', 'asc').$castTo<DuplicateAsset[]>().as('assets'),
+      )
       .where('asset.duplicateId', '=', asUuid(duplicateId))
       .where('asset.deletedAt', 'is', null)
       .where('asset.stackId', 'is', null)

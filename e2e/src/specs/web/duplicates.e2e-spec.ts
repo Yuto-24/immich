@@ -8,13 +8,11 @@ test.describe('Duplicates Utility', () => {
   let firstAsset: AssetMediaResponseDto;
   let secondAsset: AssetMediaResponseDto;
 
-  test.beforeAll(async () => {
+  test.beforeEach(async ({ context }) => {
     utils.initSdk();
     await utils.resetDatabase();
     admin = await utils.adminSetup();
-  });
 
-  test.beforeEach(async ({ context }) => {
     [firstAsset, secondAsset] = await Promise.all([
       utils.createAsset(admin.accessToken, {}),
       utils.createAsset(admin.accessToken, {}),
@@ -47,5 +45,45 @@ test.describe('Duplicates Utility', () => {
 
     await page.keyboard.press('ArrowLeft');
     await expect.poll(getViewedAssetId).toBe(initialAssetId);
+  });
+
+  test('fits duplicate cards to wide screens and scrolls before cards become too narrow', async ({ page }) => {
+    const additionalAssets = await Promise.all([
+      utils.createAsset(admin.accessToken, {}),
+      utils.createAsset(admin.accessToken, {}),
+      utils.createAsset(admin.accessToken, {}),
+    ]);
+
+    await updateAssets(
+      {
+        assetBulkUpdateDto: {
+          ids: [firstAsset.id, secondAsset.id, ...additionalAssets.map(({ id }) => id)],
+          duplicateId: crypto.randomUUID(),
+        },
+      },
+      { headers: asBearerAuth(admin.accessToken) },
+    );
+
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto('/utilities/duplicates');
+
+    const grid = page.getByTestId('duplicate-asset-grid');
+    const scroller = page.getByTestId('duplicate-asset-scroller');
+    await expect(grid.locator(':scope > div')).toHaveCount(5);
+
+    const wideLayout = await grid.evaluate((element) => ({
+      availableWidth: element.parentElement?.clientWidth ?? 0,
+      cardWidths: [...element.children].map((child) => child.getBoundingClientRect().width),
+      contentWidth: element.scrollWidth,
+    }));
+    expect(wideLayout.contentWidth).toBeLessThanOrEqual(wideLayout.availableWidth);
+    expect(Math.max(...wideLayout.cardWidths) - Math.min(...wideLayout.cardWidths)).toBeLessThan(1);
+
+    await page.setViewportSize({ width: 800, height: 1080 });
+    await expect.poll(() => scroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    const narrowCardWidths = await grid
+      .locator(':scope > div')
+      .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().width));
+    expect(Math.min(...narrowCardWidths)).toBeGreaterThanOrEqual(240);
   });
 });

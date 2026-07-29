@@ -6,10 +6,10 @@
   import LinkToDocs from './LinkToDocs.svelte';
   import DuplicatesCompareControl from './DuplicatesCompareControl.svelte';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
-  import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import ShortcutsModal from '$lib/modals/ShortcutsModal.svelte';
   import { Route } from '$lib/route';
   import { locale } from '$lib/stores/preferences.store';
+  import { getDuplicateBulkResolutionPlan } from '$lib/utils/duplicate-utils';
   import { handleError } from '$lib/utils/handle-error';
   import type { AssetResponseDto } from '@immich/sdk';
   import { createStack, deleteDuplicates, resolveDuplicates, updateAssets } from '@immich/sdk';
@@ -88,39 +88,28 @@
       return;
     }
 
-    const message = featureFlagsManager.value.trash
-      ? $t('assets_moved_to_trash_count', { values: { count: trashedCount } })
-      : $t('permanently_deleted_assets_count', { values: { count: trashedCount } });
-    toastManager.primary(message);
+    toastManager.primary($t('assets_moved_to_trash_count', { values: { count: trashedCount } }));
   };
 
   const handleResolve = async (duplicateId: string, duplicateAssetIds: string[], trashIds: string[]) => {
-    const forceDelete = !featureFlagsManager.value.trash;
-    const shouldConfirmDelete = trashIds.length > 0 && forceDelete;
+    return withConfirmation(async () => {
+      const keepAssetIds = duplicateAssetIds.filter((id) => !trashIds.includes(id));
 
-    return withConfirmation(
-      async () => {
-        const keepAssetIds = duplicateAssetIds.filter((id) => !trashIds.includes(id));
+      const response = await resolveDuplicates({
+        duplicateResolveDto: {
+          groups: [{ duplicateId, keepAssetIds, trashAssetIds: trashIds }],
+        },
+      });
 
-        const response = await resolveDuplicates({
-          duplicateResolveDto: {
-            groups: [{ duplicateId, keepAssetIds, trashAssetIds: trashIds }],
-          },
-        });
+      const { success, error, errorMessage } = response[0];
+      if (!success) {
+        throw new Error(errorMessage || error);
+      }
 
-        const { success, error, errorMessage } = response[0];
-        if (!success) {
-          throw new Error(errorMessage || error);
-        }
-
-        duplicates = duplicates.filter((duplicate) => duplicate.duplicateId !== duplicateId);
-
-        deletedNotification(trashIds.length);
-        await navigateToIndex(duplicatesIndex);
-      },
-      shouldConfirmDelete ? $t('delete_duplicates_confirmation') : undefined,
-      shouldConfirmDelete ? $t('permanently_delete') : undefined,
-    );
+      duplicates = duplicates.filter((duplicate) => duplicate.duplicateId !== duplicateId);
+      deletedNotification(trashIds.length);
+      await navigateToIndex(duplicatesIndex);
+    });
   };
 
   const handleStack = async (duplicateId: string, assets: AssetResponseDto[]) => {
@@ -132,52 +121,47 @@
   };
 
   const handleDeduplicateAll = async () => {
-    // Use server-provided suggestedKeepAssetIds from each group
-    const idsToDelete = duplicates.flatMap((group) => {
-      const keepIds = new Set(group.suggestedKeepAssetIds);
-      return group.assets.map((asset) => asset.id).filter((id) => !keepIds.has(id));
-    });
-
-    let prompt, confirmText;
-    if (featureFlagsManager.value.trash) {
-      prompt = $t('bulk_trash_duplicates_confirmation', { values: { count: idsToDelete.length } });
-      confirmText = $t('confirm');
-    } else {
-      prompt = $t('bulk_delete_duplicates_confirmation', { values: { count: idsToDelete.length } });
-      confirmText = $t('permanently_delete');
+    const plan = getDuplicateBulkResolutionPlan(duplicates);
+    if (plan.groups.length === 0) {
+      toastManager.primary(
+        $t('duplicate_bulk_resolution_result', {
+          values: { resolved: 0, skipped: plan.skippedGroupCount },
+        }),
+      );
+      return;
     }
 
     return withConfirmation(
       async () => {
-        // Resolve all groups in a single batch request
         const response = await resolveDuplicates({
-          duplicateResolveDto: {
-            groups: duplicates.map((group) => {
-              const keepIds = new Set(group.suggestedKeepAssetIds);
-              return {
-                duplicateId: group.duplicateId,
-                keepAssetIds: group.suggestedKeepAssetIds,
-                trashAssetIds: group.assets.map((asset) => asset.id).filter((id) => !keepIds.has(id)),
-              };
-            }),
-          },
+          duplicateResolveDto: { groups: plan.groups },
         });
+        const successfulGroupIds = new Set(response.filter(({ success }) => success).map(({ id }) => id));
+        const failedCount = response.length - successfulGroupIds.size;
+        const trashedCount = plan.groups
+          .filter(({ duplicateId }) => successfulGroupIds.has(duplicateId))
+          .reduce((count, { trashAssetIds }) => count + trashAssetIds.length, 0);
 
-        // Count failures and show appropriate message
-        const failedCount = response.filter(({ success }) => !success).length;
-        if (failedCount > 0) {
-          toastManager.danger($t('errors.unable_to_resolve_duplicate'));
+        duplicates = duplicates.filter(({ duplicateId }) => !successfulGroupIds.has(duplicateId));
+        deletedNotification(trashedCount);
+        toastManager.primary(
+          $t('duplicate_bulk_resolution_result', {
+            values: {
+              resolved: successfulGroupIds.size,
+              skipped: plan.skippedGroupCount + failedCount,
+            },
+          }),
+        );
+
+        if (duplicates.length === 0) {
+          page.url.searchParams.delete('index');
+          await goto(Route.duplicatesUtility());
+        } else {
+          await navigateToIndex(duplicatesIndex);
         }
-
-        duplicates = [];
-
-        deletedNotification(idsToDelete.length);
-
-        page.url.searchParams.delete('index');
-        await goto(Route.duplicatesUtility());
       },
-      prompt,
-      confirmText,
+      $t('bulk_trash_duplicates_confirmation', { values: { count: plan.trashAssetIds.length } }),
+      $t('confirm'),
     );
   };
 
@@ -260,12 +244,13 @@
       {#key duplicates[duplicatesIndex].duplicateId}
         <DuplicatesCompareControl
           assets={duplicates[duplicatesIndex].assets}
+          assessments={duplicates[duplicatesIndex].assessments}
           suggestedKeepAssetIds={duplicates[duplicatesIndex].suggestedKeepAssetIds}
           onResolve={(duplicateAssetIds, trashIds) =>
             handleResolve(duplicates[duplicatesIndex].duplicateId, duplicateAssetIds, trashIds)}
           onStack={(assets) => handleStack(duplicates[duplicatesIndex].duplicateId, assets)}
         />
-        <div class="mx-auto mb-16 max-w-5xl">
+        <div class="mb-16 w-full max-w-none">
           <div class="mb-4 flex w-full place-content-center place-items-center items-center justify-between sm:px-6">
             <div class="flex text-xs text-black">
               <Button

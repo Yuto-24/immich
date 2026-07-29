@@ -12,7 +12,7 @@
     type DifferingMetadataFields,
   } from '$lib/utils/duplicate-utils';
   import { navigate } from '$lib/utils/navigation';
-  import { getAssetInfo, type AssetResponseDto } from '@immich/sdk';
+  import { getAssetInfo, type AssetResponseDto, type DuplicateAssetAssessmentDto } from '@immich/sdk';
   import { Button, Icon } from '@immich/ui';
   import { mdiCheck, mdiChevronDown, mdiChevronUp, mdiImageMultipleOutline, mdiTrashCanOutline } from '@mdi/js';
   import { onDestroy, onMount } from 'svelte';
@@ -21,16 +21,18 @@
 
   interface Props {
     assets: AssetResponseDto[];
+    assessments: DuplicateAssetAssessmentDto[];
     suggestedKeepAssetIds: string[];
     onResolve: (duplicateAssetIds: string[], trashIds: string[]) => void;
     onStack: (assets: AssetResponseDto[]) => void;
   }
 
-  let { assets, suggestedKeepAssetIds, onResolve, onStack }: Props = $props();
+  let { assets, assessments, suggestedKeepAssetIds, onResolve, onStack }: Props = $props();
   // eslint-disable-next-line svelte/no-unnecessary-state-wrap
   let selectedAssetIds = $state(new SvelteSet<string>());
   let trashCount = $derived(assets.length - selectedAssetIds.size);
 
+  const assessmentByAssetId = $derived(new Map(assessments.map((assessment) => [assessment.assetId, assessment])));
   const InitialVisibleCount = 5;
 
   const differingMetadataFields: DifferingMetadataFields = $derived(computeDifferingMetadataFields(assets));
@@ -39,6 +41,16 @@
   let showMore = $state(false);
 
   onMount(() => {
+    const safeDefaultKeepIds = assessments
+      .filter(({ recommendedAction }) => recommendedAction !== 'trash')
+      .map(({ assetId }) => assetId);
+    if (safeDefaultKeepIds.length > 0) {
+      for (const id of safeDefaultKeepIds) {
+        selectedAssetIds.add(id);
+      }
+      return;
+    }
+
     if (suggestedKeepAssetIds.length > 0) {
       for (const id of suggestedKeepAssetIds) {
         selectedAssetIds.add(id);
@@ -117,7 +129,7 @@
   ]}
 />
 
-<div class="px-0.2 mx-auto mb-4 max-w-5xl rounded-3xl border border-gray-300 py-6 dark:border-2 dark:border-gray-700">
+<div class="px-0.2 mb-4 w-full max-w-none rounded-3xl border border-gray-300 py-6 dark:border-2 dark:border-gray-700">
   <div class="mb-4 flex w-full flex-wrap place-content-end justify-between gap-y-6 px-6">
     <!-- MARK ALL BUTTONS -->
     <div class="flex text-xs text-black">
@@ -169,11 +181,17 @@
     </div>
   </div>
 
-  <div class="overflow-x-auto p-2">
-    <div class="mx-auto flex w-fit min-w-full flex-nowrap place-items-start justify-center gap-1">
+  <div class="w-full overflow-x-auto p-2" data-testid="duplicate-asset-scroller">
+    <div
+      class="grid min-w-full items-stretch gap-1"
+      style:grid-template-columns={`repeat(${assets.length}, minmax(15rem, 1fr))`}
+      data-testid="duplicate-asset-grid"
+    >
       {#each assets as asset (asset.id)}
         <DuplicateAsset
           {asset}
+          {assets}
+          assessment={assessmentByAssetId.get(asset.id)}
           {onSelectAsset}
           isSelected={selectedAssetIds.has(asset.id)}
           {onViewAsset}

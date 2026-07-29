@@ -20,6 +20,7 @@ type TagsWithWrongTypes =
   | 'TagsList'
   | 'Keywords'
   | 'HierarchicalSubject'
+  | 'History'
   | 'ISO';
 
 export interface ImmichTags extends Omit<Tags, TagsWithWrongTypes> {
@@ -38,6 +39,14 @@ export interface ImmichTags extends Omit<Tags, TagsWithWrongTypes> {
   HierarchicalSubject?: StringOrNumber[];
   Keywords?: StringOrNumber | StringOrNumber[];
   ISO?: number | number[];
+  Software?: string;
+  ProcessingSoftware?: string;
+  CreatorTool?: string;
+  DocumentID?: string;
+  OriginalDocumentID?: string;
+  InstanceID?: string;
+  History?: unknown;
+  HistoryAction?: string | string[];
 
   // Type is wrong, can also be number.
   Description?: StringOrNumber;

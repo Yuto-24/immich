@@ -16,6 +16,7 @@ with
         select
           "asset".*,
           to_json("asset_exif") as "exifInfo",
+          to_json("asset_provenance") as "provenanceInfo",
           (
             select
               coalesce(json_agg(agg), '[]')
@@ -37,6 +38,7 @@ with
           ) as "tags"
         from
           "asset_exif"
+          left join "asset_provenance" on "asset_provenance"."assetId" = "asset"."id"
         where
           "asset_exif"."assetId" = "asset"."id"
       ) as "asset2" on true
@@ -95,6 +97,7 @@ from
     select
       "asset".*,
       to_json("asset_exif") as "exifInfo",
+      to_json("asset_provenance") as "provenanceInfo",
       (
         select
           coalesce(json_agg(agg), '[]')
@@ -116,6 +119,7 @@ from
       ) as "tags"
     from
       "asset_exif"
+      left join "asset_provenance" on "asset_provenance"."assetId" = "asset"."id"
     where
       "asset_exif"."assetId" = "asset"."id"
   ) as "asset2" on true

@@ -16,6 +16,66 @@ set
     '{}'
   )
 
+-- AssetRepository.upsertProvenance
+insert into
+  "asset_provenance" (
+    "assetId",
+    "provenance",
+    "confidence",
+    "classifierVersion",
+    "captureTimeSource",
+    "evidence",
+    "captureTimeTag",
+    "software",
+    "processingSoftware",
+    "creatorTool",
+    "documentId",
+    "originalDocumentId",
+    "instanceId",
+    "xmpHistory",
+    "screenshotFilename",
+    "isRaw",
+    "originalMimeType"
+  )
+values
+  (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9,
+    $10,
+    $11,
+    $12,
+    $13,
+    $14,
+    $15,
+    $16,
+    $17
+  )
+on conflict ("assetId") do update
+set
+  "provenance" = $18,
+  "confidence" = $19,
+  "classifierVersion" = $20,
+  "captureTimeSource" = $21,
+  "evidence" = $22,
+  "captureTimeTag" = $23,
+  "software" = $24,
+  "processingSoftware" = $25,
+  "creatorTool" = $26,
+  "documentId" = $27,
+  "originalDocumentId" = $28,
+  "instanceId" = $29,
+  "xmpHistory" = $30,
+  "screenshotFilename" = $31,
+  "isRaw" = $32,
+  "originalMimeType" = $33
+
 -- AssetRepository.updateAllExif
 update "asset_exif"
 set

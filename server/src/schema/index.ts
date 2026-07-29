@@ -46,6 +46,7 @@ import { AssetMetadataAuditTable } from 'src/schema/tables/asset-metadata-audit.
 import { AssetMetadataTable } from 'src/schema/tables/asset-metadata.table';
 import { AssetOcrAuditTable } from 'src/schema/tables/asset-ocr-audit.table';
 import { AssetOcrTable } from 'src/schema/tables/asset-ocr.table';
+import { AssetProvenanceTable } from 'src/schema/tables/asset-provenance.table';
 import { AssetTable } from 'src/schema/tables/asset.table';
 import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { GeodataPlacesTable } from 'src/schema/tables/geodata-places.table';
@@ -111,6 +112,7 @@ export class ImmichDatabase {
     AssetJobStatusTable,
     AssetOcrTable,
     AssetOcrAuditTable,
+    AssetProvenanceTable,
     AssetTable,
     AssetFileTable,
     AssetExifTable,
@@ -212,6 +214,7 @@ export interface DB {
   asset_job_status: AssetJobStatusTable;
   asset_ocr: AssetOcrTable;
   asset_ocr_audit: AssetOcrAuditTable;
+  asset_provenance: AssetProvenanceTable;
   asset_audio: AssetAudioTable;
   asset_video: AssetVideoTable;
   asset_keyframe: AssetKeyframeTable;

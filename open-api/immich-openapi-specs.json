@@ -17828,6 +17828,18 @@
         ],
         "type": "string"
       },
+      "AssetProvenance": {
+        "description": "Asset provenance classification",
+        "enum": [
+          "camera-original",
+          "scanner-original",
+          "unknown",
+          "camera-derived",
+          "screenshot",
+          "generated"
+        ],
+        "type": "string"
+      },
       "AssetRejectReason": {
         "description": "Rejection reason if rejected",
         "enum": [
@@ -18325,6 +18337,18 @@
         ],
         "type": "string"
       },
+      "CaptureTimeSource": {
+        "description": "Source of the effective asset capture time",
+        "enum": [
+          "embedded-exif",
+          "embedded-quicktime",
+          "xmp-sidecar",
+          "manual",
+          "filesystem",
+          "unknown"
+        ],
+        "type": "string"
+      },
       "CastResponse": {
         "properties": {
           "gCastEnabled": {
@@ -18763,6 +18787,57 @@
         },
         "type": "object"
       },
+      "DuplicateAssetAssessmentDto": {
+        "properties": {
+          "assetId": {
+            "description": "Assessed asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "captureTimeSource": {
+            "$ref": "#/components/schemas/CaptureTimeSource"
+          },
+          "classifierVersion": {
+            "description": "Version of the provenance classifier",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ProvenanceConfidence"
+          },
+          "evidence": {
+            "description": "Human-readable provenance evidence",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/AssetProvenance"
+          },
+          "recommendedAction": {
+            "description": "Recommended action for this asset",
+            "enum": [
+              "keep",
+              "trash",
+              "review"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "captureTimeSource",
+          "classifierVersion",
+          "confidence",
+          "evidence",
+          "provenance",
+          "recommendedAction"
+        ],
+        "type": "object"
+      },
       "DuplicateDetectionConfig": {
         "properties": {
           "enabled": {
@@ -18801,6 +18876,10 @@
       },
       "DuplicateResolveGroupDto": {
         "properties": {
+          "autoResolve": {
+            "description": "Require the server to verify that this group is safe for automatic resolution",
+            "type": "boolean"
+          },
           "duplicateId": {
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
@@ -18834,6 +18913,13 @@
       },
       "DuplicateResponseDto": {
         "properties": {
+          "assessments": {
+            "description": "Provenance assessment for every duplicate asset",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateAssetAssessmentDto"
+            },
+            "type": "array"
+          },
           "assets": {
             "description": "Duplicate assets",
             "items": {
@@ -18841,14 +18927,23 @@
             },
             "type": "array"
           },
+          "autoResolvable": {
+            "description": "Whether the group can be resolved automatically without manual review",
+            "type": "boolean"
+          },
           "duplicateId": {
             "description": "Duplicate group ID",
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
           },
+          "groupDate": {
+            "description": "Stable representative date used to sort groups",
+            "format": "date-time",
+            "type": "string"
+          },
           "suggestedKeepAssetIds": {
-            "description": "Suggested asset IDs to keep based on file size and EXIF data",
+            "description": "Suggested asset IDs to keep based on provenance and reversibility",
             "items": {
               "format": "uuid",
               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
@@ -18858,8 +18953,11 @@
           }
         },
         "required": [
+          "assessments",
           "assets",
+          "autoResolvable",
           "duplicateId",
+          "groupDate",
           "suggestedKeepAssetIds"
         ],
         "type": "object"
@@ -21441,6 +21539,15 @@
           "method"
         ],
         "type": "object"
+      },
+      "ProvenanceConfidence": {
+        "description": "Confidence in an asset provenance classification",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "type": "string"
       },
       "PurchaseResponse": {
         "properties": {

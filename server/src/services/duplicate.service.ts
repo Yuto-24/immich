@@ -6,10 +6,11 @@ import { MapAsset, mapAsset } from 'src/dtos/asset-response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { DuplicateResolveDto, DuplicateResolveGroupDto, DuplicateResponseDto } from 'src/dtos/duplicate.dto';
 import { AssetStatus, AssetVisibility, JobName, JobStatus, Permission, QueueName } from 'src/enum';
+import { DuplicateAsset } from 'src/repositories/duplicate.repository';
 import { AssetDuplicateResult } from 'src/repositories/search.repository';
 import { BaseService } from 'src/services/base.service';
 import { JobItem, JobOf } from 'src/types';
-import { suggestDuplicateKeepAssetIds } from 'src/utils/duplicate';
+import { assessDuplicateGroup, DuplicateGroupAssessment } from 'src/utils/duplicate';
 import { isDuplicateDetectionEnabled } from 'src/utils/misc';
 
 type ResolveRequest = {
@@ -64,6 +65,11 @@ const getUniqueCoordinate = (assets: MapAsset[], key: 'latitude' | 'longitude'):
   return unique.size === 1 ? [...unique][0] : null;
 };
 
+const haveSameIds = (a: string[], b: string[]) => {
+  const aSet = new Set(a);
+  return aSet.size === a.length && aSet.size === b.length && b.every((id) => aSet.has(id));
+};
+
 @Injectable()
 export class DuplicateService extends BaseService {
   async getDuplicates(auth: AuthDto): Promise<DuplicateResponseDto[]> {
@@ -71,14 +77,30 @@ export class DuplicateService extends BaseService {
     await this.duplicateRepository.cleanupSingletonGroups(auth.user.id);
 
     const duplicates = await this.duplicateRepository.getAll(auth.user.id);
-    return duplicates.map(({ duplicateId, assets }) => {
-      const mappedAssets = assets.map((asset) => mapAsset(asset, { auth }));
-      return {
-        duplicateId,
-        assets: mappedAssets,
-        suggestedKeepAssetIds: suggestDuplicateKeepAssetIds(mappedAssets),
-      };
-    });
+    return duplicates
+      .map(({ duplicateId, assets }) => {
+        const assessment = this.assessGroup(auth, assets);
+        return {
+          duplicateId,
+          assets: assessment.rankedAssets,
+          suggestedKeepAssetIds: assessment.suggestedKeepAssetIds,
+          autoResolvable: assessment.autoResolvable,
+          assessments: assessment.assessments,
+          groupDate: assessment.groupDate,
+        };
+      })
+      .toSorted(
+        (a, b) => Date.parse(b.groupDate) - Date.parse(a.groupDate) || a.duplicateId.localeCompare(b.duplicateId),
+      );
+  }
+
+  private assessGroup(auth: AuthDto, assets: DuplicateAsset[]): DuplicateGroupAssessment {
+    return assessDuplicateGroup(
+      assets.map((asset) => ({
+        asset: mapAsset(asset, { auth }),
+        provenanceInfo: asset.provenanceInfo,
+      })),
+    );
   }
 
   async delete(auth: AuthDto, id: string): Promise<void> {
@@ -116,6 +138,26 @@ export class DuplicateService extends BaseService {
     const duplicateGroup = await this.duplicateRepository.get(duplicateId);
     if (!duplicateGroup) {
       return { id: duplicateId, success: false, error: BulkIdErrorReason.NOT_FOUND };
+    }
+
+    if (group.autoResolve) {
+      const assessment = this.assessGroup(auth, duplicateGroup.assets);
+      const expectedKeepAssetIds = assessment.suggestedKeepAssetIds;
+      const expectedTrashAssetIds = duplicateGroup.assets
+        .map(({ id }) => id)
+        .filter((id) => !expectedKeepAssetIds.includes(id));
+      if (
+        !assessment.autoResolvable ||
+        !haveSameIds(keepAssetIds, expectedKeepAssetIds) ||
+        !haveSameIds(trashAssetIds, expectedTrashAssetIds)
+      ) {
+        return {
+          id: duplicateId,
+          success: false,
+          error: BulkIdErrorReason.VALIDATION,
+          errorMessage: 'Duplicate group is not safe for automatic resolution',
+        };
+      }
     }
 
     const groupAssetIds = new Set(duplicateGroup.assets.map((a) => a.id));
@@ -218,17 +260,14 @@ export class DuplicateService extends BaseService {
     }
 
     if (idsToTrash.length > 0) {
-      // TODO: this is duplicated with AssetService.deleteAssets
-      const { trash } = await this.getConfig({ withCache: true });
-      const force = !trash.enabled;
-
+      // Provenance-based duplicate resolution is intentionally recoverable during initial rollout.
       await this.assetRepository.updateAll(idsToTrash, {
         deletedAt: new Date(),
-        status: force ? AssetStatus.Deleted : AssetStatus.Trashed,
+        status: AssetStatus.Trashed,
         duplicateId: null,
       });
 
-      await this.eventRepository.emit(force ? 'AssetDeleteAll' : 'AssetTrashAll', {
+      await this.eventRepository.emit('AssetTrashAll', {
         assetIds: idsToTrash,
         userId: auth.user.id,
       });

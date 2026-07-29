@@ -1,4 +1,4 @@
-import type { AssetResponseDto } from '@immich/sdk';
+import type { AssetResponseDto, DuplicateResolveGroupDto, DuplicateResponseDto } from '@immich/sdk';
 import {
   mdiBrightness6,
   mdiCalendar,
@@ -222,18 +222,82 @@ const metadataFields = [
 export type MetadataFieldKey = (typeof metadataFields)[number]['keys'][number];
 export type DifferingMetadataFields = Partial<Record<MetadataFieldKey, boolean>>;
 
+export type StringComparisonSegment = {
+  text: string;
+  isDifferent: boolean;
+};
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * Splits each value into its common prefix, differing middle, and common suffix.
+ *
+ * Comparing only stable affixes keeps differences easy to scan across groups of
+ * three or more values and avoids the scattered matches produced by an LCS diff.
+ */
+export const getStringComparisonSegments = (values: readonly string[]): StringComparisonSegment[][] => {
+  if (values.length === 0) {
+    return [];
+  }
+
+  const graphemes = values.map((value) => [...graphemeSegmenter.segment(value)].map(({ segment }) => segment));
+  const shortestLength = Math.min(...graphemes.map((value) => value.length));
+
+  let prefixLength = 0;
+  while (
+    prefixLength < shortestLength &&
+    graphemes.every((value) => value[prefixLength] === graphemes[0][prefixLength])
+  ) {
+    prefixLength++;
+  }
+
+  let suffixLength = 0;
+  while (
+    suffixLength < shortestLength - prefixLength &&
+    graphemes.every(
+      (value) => value[value.length - 1 - suffixLength] === graphemes[0][graphemes[0].length - 1 - suffixLength],
+    )
+  ) {
+    suffixLength++;
+  }
+
+  return graphemes.map((value) => {
+    const segments: StringComparisonSegment[] = [];
+    const prefix = value.slice(0, prefixLength).join('');
+    const middle = value.slice(prefixLength, value.length - suffixLength).join('');
+    const suffix = suffixLength === 0 ? '' : value.slice(-suffixLength).join('');
+
+    if (prefix) {
+      segments.push({ text: prefix, isDifferent: false });
+    }
+    if (middle) {
+      segments.push({ text: middle, isDifferent: true });
+    }
+    if (suffix) {
+      segments.push({ text: suffix, isDifferent: false });
+    }
+
+    return segments;
+  });
+};
+
 export const metadataKeys: readonly MetadataFieldKey[] = metadataFields.flatMap(({ keys }) => keys);
 
 export const countDifferingMetadataItems = (differing: DifferingMetadataFields): number =>
   metadataFields.filter(({ keys }) => keys.some((k) => differing[k as MetadataFieldKey])).length;
 
 export const getAllMetadataItems = (asset: AssetResponseDto, $t: MessageFormatter, locale: string | undefined) =>
-  metadataFields.map(({ icon, titleKey, keys, render }) => ({
-    icon,
-    title: $t(titleKey),
-    render: render(asset, $t, locale),
-    keys,
-  }));
+  metadataFields.map(({ icon, titleKey, keys, render }) => {
+    const renderedValue = render(asset, $t, locale);
+
+    return {
+      icon,
+      title: $t(titleKey),
+      render: renderedValue,
+      comparisonValue: titleKey === 'path' ? asset.originalPath : renderedValue,
+      keys,
+    };
+  });
 
 const normalizeForComparison = (key: MetadataFieldKey, value: unknown): unknown => {
   if (value === null || value === undefined) {
@@ -298,4 +362,31 @@ export const computeDifferingMetadataFields = (assets: AssetResponseDto[]): Diff
   }
 
   return diffs;
+};
+
+export interface DuplicateBulkResolutionPlan {
+  groups: DuplicateResolveGroupDto[];
+  trashAssetIds: string[];
+  skippedGroupCount: number;
+}
+
+export const getDuplicateBulkResolutionPlan = (
+  duplicates: readonly DuplicateResponseDto[],
+): DuplicateBulkResolutionPlan => {
+  const eligibleGroups = duplicates.filter(({ autoResolvable }) => autoResolvable);
+  const groups = eligibleGroups.map((group) => {
+    const keepIds = new Set(group.suggestedKeepAssetIds);
+    return {
+      duplicateId: group.duplicateId,
+      keepAssetIds: group.suggestedKeepAssetIds,
+      trashAssetIds: group.assets.map(({ id }) => id).filter((id) => !keepIds.has(id)),
+      autoResolve: true,
+    };
+  });
+
+  return {
+    groups,
+    trashAssetIds: groups.flatMap(({ trashAssetIds }) => trashAssetIds),
+    skippedGroupCount: duplicates.length - eligibleGroups.length,
+  };
 };

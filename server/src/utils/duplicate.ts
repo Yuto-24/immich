@@ -1,5 +1,7 @@
 import { AssetResponseDto } from 'src/dtos/asset-response.dto';
 
+export * from 'src/utils/duplicate-provenance';
+
 /**
  * Counts all truthy values in the exifInfo object.
  * This matches the client implementation in web/src/lib/utils/exif-utils.ts

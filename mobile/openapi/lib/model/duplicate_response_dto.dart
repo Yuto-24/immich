@@ -13,40 +13,61 @@ part of openapi.api;
 class DuplicateResponseDto {
   /// Returns a new [DuplicateResponseDto] instance.
   DuplicateResponseDto({
+    this.assessments = const [],
     this.assets = const [],
+    required this.autoResolvable,
     required this.duplicateId,
+    required this.groupDate,
     this.suggestedKeepAssetIds = const [],
   });
+
+  /// Provenance assessment for every duplicate asset
+  List<DuplicateAssetAssessmentDto> assessments;
 
   /// Duplicate assets
   List<AssetResponseDto> assets;
 
+  /// Whether the group can be resolved automatically without manual review
+  bool autoResolvable;
+
   /// Duplicate group ID
   String duplicateId;
 
-  /// Suggested asset IDs to keep based on file size and EXIF data
+  /// Stable representative date used to sort groups
+  DateTime groupDate;
+
+  /// Suggested asset IDs to keep based on provenance and reversibility
   List<String> suggestedKeepAssetIds;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is DuplicateResponseDto &&
+    _deepEquality.equals(other.assessments, assessments) &&
     _deepEquality.equals(other.assets, assets) &&
+    other.autoResolvable == autoResolvable &&
     other.duplicateId == duplicateId &&
+    other.groupDate == groupDate &&
     _deepEquality.equals(other.suggestedKeepAssetIds, suggestedKeepAssetIds);
 
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (assessments.hashCode) +
     (assets.hashCode) +
+    (autoResolvable.hashCode) +
     (duplicateId.hashCode) +
+    (groupDate.hashCode) +
     (suggestedKeepAssetIds.hashCode);
 
   @override
-  String toString() => 'DuplicateResponseDto[assets=$assets, duplicateId=$duplicateId, suggestedKeepAssetIds=$suggestedKeepAssetIds]';
+  String toString() => 'DuplicateResponseDto[assessments=$assessments, assets=$assets, autoResolvable=$autoResolvable, duplicateId=$duplicateId, groupDate=$groupDate, suggestedKeepAssetIds=$suggestedKeepAssetIds]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+      json[r'assessments'] = this.assessments;
       json[r'assets'] = this.assets;
+      json[r'autoResolvable'] = this.autoResolvable;
       json[r'duplicateId'] = this.duplicateId;
+      json[r'groupDate'] = this.groupDate.toUtc().toIso8601String();
       json[r'suggestedKeepAssetIds'] = this.suggestedKeepAssetIds;
     return json;
   }
@@ -60,8 +81,11 @@ class DuplicateResponseDto {
       final json = value.cast<String, dynamic>();
 
       return DuplicateResponseDto(
+        assessments: DuplicateAssetAssessmentDto.listFromJson(json[r'assessments']),
         assets: AssetResponseDto.listFromJson(json[r'assets']),
+        autoResolvable: mapValueOfType<bool>(json, r'autoResolvable')!,
         duplicateId: mapValueOfType<String>(json, r'duplicateId')!,
+        groupDate: mapDateTime(json, r'groupDate', r'')!,
         suggestedKeepAssetIds: json[r'suggestedKeepAssetIds'] is Iterable
             ? (json[r'suggestedKeepAssetIds'] as Iterable).cast<String>().toList(growable: false)
             : const [],
@@ -112,8 +136,11 @@ class DuplicateResponseDto {
 
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
+    'assessments',
     'assets',
+    'autoResolvable',
     'duplicateId',
+    'groupDate',
     'suggestedKeepAssetIds',
   };
 }

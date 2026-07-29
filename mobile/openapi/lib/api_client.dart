@@ -295,6 +295,8 @@ class ApiClient {
           return AssetOrderTypeTransformer().decode(value);
         case 'AssetOrderBy':
           return AssetOrderByTypeTransformer().decode(value);
+        case 'AssetProvenance':
+          return AssetProvenanceTypeTransformer().decode(value);
         case 'AssetRejectReason':
           return AssetRejectReasonTypeTransformer().decode(value);
         case 'AssetResponseDto':
@@ -331,6 +333,8 @@ class ApiClient {
           return CalendarHeatmapResponseDtoSeriesInner.fromJson(value);
         case 'CalendarHeatmapType':
           return CalendarHeatmapTypeTypeTransformer().decode(value);
+        case 'CaptureTimeSource':
+          return CaptureTimeSourceTypeTransformer().decode(value);
         case 'CastResponse':
           return CastResponse.fromJson(value);
         case 'CastUpdate':
@@ -369,6 +373,8 @@ class ApiClient {
           return DownloadResponseDto.fromJson(value);
         case 'DownloadUpdate':
           return DownloadUpdate.fromJson(value);
+        case 'DuplicateAssetAssessmentDto':
+          return DuplicateAssetAssessmentDto.fromJson(value);
         case 'DuplicateDetectionConfig':
           return DuplicateDetectionConfig.fromJson(value);
         case 'DuplicateResolveDto':
@@ -541,6 +547,8 @@ class ApiClient {
           return PluginTemplateResponseDto.fromJson(value);
         case 'PluginTemplateStepResponseDto':
           return PluginTemplateStepResponseDto.fromJson(value);
+        case 'ProvenanceConfidence':
+          return ProvenanceConfidenceTypeTransformer().decode(value);
         case 'PurchaseResponse':
           return PurchaseResponse.fromJson(value);
         case 'PurchaseUpdate':

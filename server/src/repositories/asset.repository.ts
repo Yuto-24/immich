@@ -32,6 +32,7 @@ import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
 import { AssetFileTable } from 'src/schema/tables/asset-file.table';
 import { AssetJobStatusTable } from 'src/schema/tables/asset-job-status.table';
 import { AssetMetadataTable } from 'src/schema/tables/asset-metadata.table';
+import { AssetProvenanceTable } from 'src/schema/tables/asset-provenance.table';
 import { AssetTable } from 'src/schema/tables/asset.table';
 import {
   anyUuid,
@@ -304,6 +305,38 @@ export class AssetRepository {
           };
         }),
       )
+      .execute();
+  }
+
+  @GenerateSql({
+    params: [
+      {
+        assetId: DummyValue.UUID,
+        provenance: 'unknown',
+        confidence: 'low',
+        classifierVersion: 1,
+        captureTimeSource: 'filesystem',
+        evidence: ['No reliable provenance metadata'],
+        captureTimeTag: null,
+        software: null,
+        processingSoftware: null,
+        creatorTool: null,
+        documentId: null,
+        originalDocumentId: null,
+        instanceId: null,
+        xmpHistory: null,
+        screenshotFilename: null,
+        isRaw: false,
+        originalMimeType: 'image/jpeg',
+      },
+    ],
+  })
+  async upsertProvenance(provenance: Insertable<AssetProvenanceTable>): Promise<void> {
+    const { assetId: _assetId, ...updates } = provenance;
+    await this.db
+      .insertInto('asset_provenance')
+      .values(provenance)
+      .onConflict((oc) => oc.column('assetId').doUpdateSet(updates))
       .execute();
   }
 

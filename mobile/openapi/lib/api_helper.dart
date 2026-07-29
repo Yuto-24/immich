@@ -79,6 +79,9 @@ String parameterToString(dynamic value) {
   if (value is AssetOrderBy) {
     return AssetOrderByTypeTransformer().encode(value).toString();
   }
+  if (value is AssetProvenance) {
+    return AssetProvenanceTypeTransformer().encode(value).toString();
+  }
   if (value is AssetRejectReason) {
     return AssetRejectReasonTypeTransformer().encode(value).toString();
   }
@@ -102,6 +105,9 @@ String parameterToString(dynamic value) {
   }
   if (value is CalendarHeatmapType) {
     return CalendarHeatmapTypeTypeTransformer().encode(value).toString();
+  }
+  if (value is CaptureTimeSource) {
+    return CaptureTimeSourceTypeTransformer().encode(value).toString();
   }
   if (value is Colorspace) {
     return ColorspaceTypeTransformer().encode(value).toString();
@@ -150,6 +156,9 @@ String parameterToString(dynamic value) {
   }
   if (value is Permission) {
     return PermissionTypeTransformer().encode(value).toString();
+  }
+  if (value is ProvenanceConfidence) {
+    return ProvenanceConfidenceTypeTransformer().encode(value).toString();
   }
   if (value is QueueCommand) {
     return QueueCommandTypeTransformer().encode(value).toString();

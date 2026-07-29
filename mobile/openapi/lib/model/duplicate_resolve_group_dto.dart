@@ -13,10 +13,20 @@ part of openapi.api;
 class DuplicateResolveGroupDto {
   /// Returns a new [DuplicateResolveGroupDto] instance.
   DuplicateResolveGroupDto({
+    this.autoResolve = const Optional.absent(),
     required this.duplicateId,
     this.keepAssetIds = const [],
     this.trashAssetIds = const [],
   });
+
+  /// Require the server to verify that this group is safe for automatic resolution
+  ///
+  /// Please note: This property should have been non-nullable! Since the specification file
+  /// does not include a default value (using the "default:" property), however, the generated
+  /// source code must fall back to having a nullable type.
+  /// Consider adding a "default:" property in the specification file to hide this note.
+  ///
+  Optional<bool?> autoResolve;
 
   String duplicateId;
 
@@ -28,6 +38,7 @@ class DuplicateResolveGroupDto {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is DuplicateResolveGroupDto &&
+    other.autoResolve == autoResolve &&
     other.duplicateId == duplicateId &&
     _deepEquality.equals(other.keepAssetIds, keepAssetIds) &&
     _deepEquality.equals(other.trashAssetIds, trashAssetIds);
@@ -35,15 +46,20 @@ class DuplicateResolveGroupDto {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (autoResolve == null ? 0 : autoResolve!.hashCode) +
     (duplicateId.hashCode) +
     (keepAssetIds.hashCode) +
     (trashAssetIds.hashCode);
 
   @override
-  String toString() => 'DuplicateResolveGroupDto[duplicateId=$duplicateId, keepAssetIds=$keepAssetIds, trashAssetIds=$trashAssetIds]';
+  String toString() => 'DuplicateResolveGroupDto[autoResolve=$autoResolve, duplicateId=$duplicateId, keepAssetIds=$keepAssetIds, trashAssetIds=$trashAssetIds]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+    if (this.autoResolve.isPresent) {
+      final value = this.autoResolve.value;
+      json[r'autoResolve'] = value;
+    }
       json[r'duplicateId'] = this.duplicateId;
       json[r'keepAssetIds'] = this.keepAssetIds;
       json[r'trashAssetIds'] = this.trashAssetIds;
@@ -59,6 +75,7 @@ class DuplicateResolveGroupDto {
       final json = value.cast<String, dynamic>();
 
       return DuplicateResolveGroupDto(
+        autoResolve: json.containsKey(r'autoResolve') ? Optional.present(mapValueOfType<bool>(json, r'autoResolve')) : const Optional.absent(),
         duplicateId: mapValueOfType<String>(json, r'duplicateId')!,
         keepAssetIds: json[r'keepAssetIds'] is Iterable
             ? (json[r'keepAssetIds'] as Iterable).cast<String>().toList(growable: false)

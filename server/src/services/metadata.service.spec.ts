@@ -7,6 +7,7 @@ import {
   AssetFileType,
   AssetType,
   AssetVisibility,
+  CaptureTimeSource,
   ChecksumAlgorithm,
   ExifOrientation,
   ImmichWorker,
@@ -87,6 +88,7 @@ describe(MetadataService.name, () => {
     mockReadTags();
 
     mocks.config.getWorker.mockReturnValue(ImmichWorker.Microservices);
+    mocks.assetJob.getLockedPropertiesForMetadataExtraction.mockResolvedValue([]);
 
     delete process.env.TZ;
   });
@@ -201,6 +203,14 @@ describe(MetadataService.name, () => {
           lockedPropertiesBehavior: 'skip',
         }),
       );
+      expect(mocks.asset.upsertProvenance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: asset.id,
+          captureTimeSource: CaptureTimeSource.XmpSidecar,
+          captureTimeTag: 'CreationDate',
+        }),
+      );
+
       expect(mocks.asset.update).toHaveBeenCalledWith(
         expect.objectContaining({
           id: asset.id,
@@ -230,6 +240,13 @@ describe(MetadataService.name, () => {
         expect.objectContaining({
           exif: expect.objectContaining({ dateTimeOriginal: fileModifiedAt }),
           lockedPropertiesBehavior: 'skip',
+        }),
+      );
+      expect(mocks.asset.upsertProvenance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: asset.id,
+          captureTimeSource: CaptureTimeSource.Filesystem,
+          captureTimeTag: null,
         }),
       );
       expect(mocks.asset.update).toHaveBeenCalledWith({
@@ -291,9 +308,51 @@ describe(MetadataService.name, () => {
         }),
       );
 
+      expect(mocks.asset.upsertProvenance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: asset.id,
+          captureTimeSource: CaptureTimeSource.EmbeddedExif,
+          captureTimeTag: 'DateTimeOriginal',
+        }),
+      );
+
       expect(mocks.asset.update).toHaveBeenCalledWith(
         expect.objectContaining({
           localDateTime: new Date('2022-01-01T00:00:00.000Z'),
+        }),
+      );
+    });
+
+    it('should record a QuickTime capture date source for videos', async () => {
+      const asset = AssetFactory.create({ type: AssetType.Video });
+      mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));
+      mocks.media.probe.mockResolvedValue(videoInfoStub.videoStreamH264);
+      mockReadTags({ CreationDate: '2022:01:01 00:00:00' });
+
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      expect(mocks.asset.upsertProvenance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: asset.id,
+          captureTimeSource: CaptureTimeSource.EmbeddedQuickTime,
+          captureTimeTag: 'CreationDate',
+        }),
+      );
+    });
+
+    it('should preserve that a locked capture date is manual', async () => {
+      const asset = AssetFactory.create();
+      mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));
+      mocks.assetJob.getLockedPropertiesForMetadataExtraction.mockResolvedValue(['dateTimeOriginal']);
+      mockReadTags({ DateTimeOriginal: '2022:01:01 00:00:00' });
+
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      expect(mocks.asset.upsertProvenance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: asset.id,
+          captureTimeSource: CaptureTimeSource.Manual,
+          captureTimeTag: 'lockedProperties.dateTimeOriginal',
         }),
       );
     });

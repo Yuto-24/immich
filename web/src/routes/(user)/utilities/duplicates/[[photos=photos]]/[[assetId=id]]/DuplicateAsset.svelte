@@ -1,17 +1,24 @@
 <script lang="ts">
   import { lang, locale } from '$lib/stores/preferences.store';
   import { getAssetMediaUrl } from '$lib/utils';
-  import { getAllMetadataItems, type DifferingMetadataFields } from '$lib/utils/duplicate-utils';
+  import {
+    getAllMetadataItems,
+    getStringComparisonSegments,
+    type DifferingMetadataFields,
+  } from '$lib/utils/duplicate-utils';
   import { getAltText } from '$lib/utils/thumbnail-util';
   import { toTimelineAsset } from '$lib/utils/timeline-util';
-  import { getAllAlbums, type AssetResponseDto } from '@immich/sdk';
+  import { getAllAlbums, type AssetResponseDto, type DuplicateAssetAssessmentDto } from '@immich/sdk';
   import { Icon } from '@immich/ui';
   import { mdiBookmarkOutline, mdiHeart, mdiImageMultipleOutline, mdiMagnifyPlus } from '@mdi/js';
-  import { t } from 'svelte-i18n';
+  import { t, type Translations } from 'svelte-i18n';
   import InfoRow from './InfoRow.svelte';
+  import StringComparison from './StringComparison.svelte';
 
   interface Props {
     asset: AssetResponseDto;
+    assets: AssetResponseDto[];
+    assessment?: DuplicateAssetAssessmentDto;
     isSelected: boolean;
     onSelectAsset: (asset: AssetResponseDto) => void;
     onViewAsset: (asset: AssetResponseDto) => void;
@@ -22,6 +29,8 @@
 
   let {
     asset,
+    assets,
+    assessment,
     isSelected,
     onSelectAsset,
     onViewAsset,
@@ -33,19 +42,116 @@
   const listFormat = $derived(new Intl.ListFormat($lang));
   const isFromExternalLibrary = $derived(!!asset.libraryId);
 
-  const visibleMetadataItems = $derived(
-    getAllMetadataItems(asset, $t, $locale)
+  const provenanceLabelKeys: Record<DuplicateAssetAssessmentDto['provenance'], Translations> = {
+    'camera-original': 'duplicate_provenance_camera_original',
+    'scanner-original': 'duplicate_provenance_scanner_original',
+    unknown: 'duplicate_provenance_unknown',
+    'camera-derived': 'duplicate_provenance_camera_derived',
+    screenshot: 'duplicate_provenance_screenshot',
+    generated: 'duplicate_provenance_generated',
+  };
+  const actionLabelKeys: Record<DuplicateAssetAssessmentDto['recommendedAction'], Translations> = {
+    keep: 'duplicate_recommended_keep',
+    trash: 'duplicate_recommended_trash',
+    review: 'duplicate_recommended_review',
+  };
+  const actionClasses: Record<DuplicateAssetAssessmentDto['recommendedAction'], string> = {
+    keep: 'bg-success/15 text-success dark:bg-success/20',
+    trash: 'bg-danger/15 text-danger dark:bg-danger/20',
+    review: 'bg-warning/15 text-warning dark:bg-warning/20',
+  };
+
+  const visibleMetadataItems = $derived.by(() => {
+    const assetIndex = assets.findIndex((comparisonAsset) => comparisonAsset.id === asset.id);
+    const comparisonAssets = assetIndex === -1 ? [...assets, asset] : assets;
+    const currentAssetIndex = assetIndex === -1 ? comparisonAssets.length - 1 : assetIndex;
+    const metadataItemsByAsset = comparisonAssets.map((comparisonAsset) =>
+      getAllMetadataItems(comparisonAsset, $t, $locale),
+    );
+
+    return getAllMetadataItems(asset, $t, $locale)
+      .map((item, index) => {
+        const comparedItems = metadataItemsByAsset.map((metadataItems) => metadataItems[index]);
+        const renderedValues = comparedItems.map(({ render }) => render);
+        const comparisonValues = comparedItems.map(({ comparisonValue }) => comparisonValue);
+        const renderedSegments = getStringComparisonSegments(renderedValues);
+        const comparisonSegments = getStringComparisonSegments(comparisonValues);
+        const hiddenRawDifference =
+          renderedSegments.every((segments) => segments.every(({ isDifferent }) => !isDifferent)) &&
+          comparisonSegments.some((segments) => segments.some(({ isDifferent }) => isDifferent));
+
+        return {
+          ...item,
+          comparisonSegments: hiddenRawDifference
+            ? [{ text: item.render, isDifferent: true }]
+            : renderedSegments[currentAssetIndex],
+        };
+      })
       .filter(({ keys }) => keys.some((k) => differingMetadataFields[k]))
-      .slice(0, showMore ? undefined : initialVisibleCount),
-  );
+      .slice(0, showMore ? undefined : initialVisibleCount);
+  });
 </script>
 
-<div class="min-w-60 flex-1 rounded-lg border transition-colors">
-  <div class="relative w-full">
+<div class="flex min-w-60 flex-1 flex-col overflow-hidden rounded-lg border transition-colors">
+  <div
+    class="grid min-h-48 flex-1 place-items-start gap-y-2 py-2 text-sm transition-colors {isSelected
+      ? 'bg-success/15 dark:bg-[#001a06]'
+      : 'bg-transparent'}"
+  >
+    {#if assessment}
+      <div class="w-full border-b border-gray-200 px-3 pb-2 dark:border-gray-700" data-testid="provenance-assessment">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span
+            class="rounded-full bg-immich-primary/10 px-2 py-0.5 font-medium text-immich-primary dark:bg-immich-primary/20"
+          >
+            {$t(provenanceLabelKeys[assessment.provenance])}
+          </span>
+          <span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-700 dark:text-gray-200">
+            {$t('duplicate_confidence', { values: { confidence: assessment.confidence } })}
+          </span>
+          <span class="rounded-full px-2 py-0.5 font-medium {actionClasses[assessment.recommendedAction]}">
+            {$t(actionLabelKeys[assessment.recommendedAction])}
+          </span>
+        </div>
+        {#if assessment.evidence.length > 0}
+          <ul
+            class="mt-1 list-inside list-disc text-xs text-gray-600 dark:text-gray-300"
+            title={assessment.evidence.join('\n')}
+          >
+            {#each assessment.evidence.slice(0, 2) as evidence (evidence)}
+              <li class="truncate">{evidence}</li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+    {#each visibleMetadataItems as { icon, title, comparisonValue, keys, comparisonSegments } (keys[0])}
+      <InfoRow {icon} {title}>
+        <StringComparison value={comparisonValue} segments={comparisonSegments} />
+      </InfoRow>
+    {/each}
+
+    <!-- Albums always shown -->
+    <InfoRow icon={mdiBookmarkOutline} borderBottom={false} title={$t('albums')}>
+      {#await getAllAlbums({ assetId: asset.id })}
+        {$t('scanning_for_album')}
+      {:then albums}
+        {#if albums.length === 1}
+          {albums[0].albumName}
+        {:else}
+          <span title={listFormat.format(albums.map(({ albumName }) => albumName))}>
+            {$t('in_albums', { values: { count: albums.length } })}
+          </span>
+        {/if}
+      {/await}
+    </InfoRow>
+  </div>
+
+  <div class="relative h-60 w-full bg-black/5 sm:h-72 xl:h-80 dark:bg-white/5">
     <button
       type="button"
       onclick={() => onSelectAsset(asset)}
-      class="relative block w-full"
+      class="relative block size-full"
       aria-pressed={isSelected}
       aria-label={$t('keep')}
     >
@@ -53,7 +159,7 @@
       <img
         src={getAssetMediaUrl({ id: asset.id })}
         alt={$getAltText(toTimelineAsset(asset))}
-        class="h-60 w-full rounded-t-md object-cover"
+        class="size-full object-contain"
         draggable="false"
       />
 
@@ -99,32 +205,5 @@
     >
       <Icon aria-label={$t('view')} icon={mdiMagnifyPlus} flipped size="18" />
     </button>
-  </div>
-
-  <div
-    class="grid place-items-start gap-y-2 rounded-b-lg py-2 text-sm transition-colors {isSelected
-      ? 'bg-success/15 dark:bg-[#001a06]'
-      : 'bg-transparent'}"
-  >
-    {#each visibleMetadataItems as { icon, title, render, keys } (keys[0])}
-      <InfoRow {icon} {title}>
-        {render}
-      </InfoRow>
-    {/each}
-
-    <!-- Albums always shown -->
-    <InfoRow icon={mdiBookmarkOutline} borderBottom={false} title={$t('albums')}>
-      {#await getAllAlbums({ assetId: asset.id })}
-        {$t('scanning_for_album')}
-      {:then albums}
-        {#if albums.length === 1}
-          {albums[0].albumName}
-        {:else}
-          <span title={listFormat.format(albums.map(({ albumName }) => albumName))}>
-            {$t('in_albums', { values: { count: albums.length } })}
-          </span>
-        {/if}
-      {/await}
-    </InfoRow>
   </div>
 </div>

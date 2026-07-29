@@ -1141,15 +1141,36 @@ export type DownloadResponseDto = {
     /** Total size in bytes */
     totalSize: number;
 };
+export type DuplicateAssetAssessmentDto = {
+    /** Assessed asset ID */
+    assetId: string;
+    captureTimeSource: CaptureTimeSource;
+    /** Version of the provenance classifier */
+    classifierVersion: number;
+    confidence: ProvenanceConfidence;
+    /** Human-readable provenance evidence */
+    evidence: string[];
+    provenance: AssetProvenance;
+    /** Recommended action for this asset */
+    recommendedAction: RecommendedAction;
+};
 export type DuplicateResponseDto = {
+    /** Provenance assessment for every duplicate asset */
+    assessments: DuplicateAssetAssessmentDto[];
     /** Duplicate assets */
     assets: AssetResponseDto[];
+    /** Whether the group can be resolved automatically without manual review */
+    autoResolvable: boolean;
     /** Duplicate group ID */
     duplicateId: string;
-    /** Suggested asset IDs to keep based on file size and EXIF data */
+    /** Stable representative date used to sort groups */
+    groupDate: string;
+    /** Suggested asset IDs to keep based on provenance and reversibility */
     suggestedKeepAssetIds: string[];
 };
 export type DuplicateResolveGroupDto = {
+    /** Require the server to verify that this group is safe for automatic resolution */
+    autoResolve?: boolean;
     duplicateId: string;
     /** Asset IDs to keep */
     keepAssetIds: string[];
@@ -7355,6 +7376,32 @@ export enum AssetMediaSize {
     Fullsize = "fullsize",
     Preview = "preview",
     Thumbnail = "thumbnail"
+}
+export enum CaptureTimeSource {
+    EmbeddedExif = "embedded-exif",
+    EmbeddedQuicktime = "embedded-quicktime",
+    XmpSidecar = "xmp-sidecar",
+    Manual = "manual",
+    Filesystem = "filesystem",
+    Unknown = "unknown"
+}
+export enum ProvenanceConfidence {
+    High = "high",
+    Medium = "medium",
+    Low = "low"
+}
+export enum AssetProvenance {
+    CameraOriginal = "camera-original",
+    ScannerOriginal = "scanner-original",
+    Unknown = "unknown",
+    CameraDerived = "camera-derived",
+    Screenshot = "screenshot",
+    Generated = "generated"
+}
+export enum RecommendedAction {
+    Keep = "keep",
+    Trash = "trash",
+    Review = "review"
 }
 export enum SourceType {
     MachineLearning = "machine-learning",

@@ -44,6 +44,45 @@ export enum AssetType {
 
 export const AssetTypeSchema = z.enum(AssetType).describe('Asset type').meta({ id: 'AssetTypeEnum' });
 
+export enum AssetProvenance {
+  CameraOriginal = 'camera-original',
+  ScannerOriginal = 'scanner-original',
+  Unknown = 'unknown',
+  CameraDerived = 'camera-derived',
+  Screenshot = 'screenshot',
+  Generated = 'generated',
+}
+
+export const AssetProvenanceSchema = z
+  .enum(AssetProvenance)
+  .describe('Asset provenance classification')
+  .meta({ id: 'AssetProvenance' });
+
+export enum ProvenanceConfidence {
+  High = 'high',
+  Medium = 'medium',
+  Low = 'low',
+}
+
+export const ProvenanceConfidenceSchema = z
+  .enum(ProvenanceConfidence)
+  .describe('Confidence in an asset provenance classification')
+  .meta({ id: 'ProvenanceConfidence' });
+
+export enum CaptureTimeSource {
+  EmbeddedExif = 'embedded-exif',
+  EmbeddedQuickTime = 'embedded-quicktime',
+  XmpSidecar = 'xmp-sidecar',
+  Manual = 'manual',
+  Filesystem = 'filesystem',
+  Unknown = 'unknown',
+}
+
+export const CaptureTimeSourceSchema = z
+  .enum(CaptureTimeSource)
+  .describe('Source of the effective asset capture time')
+  .meta({ id: 'CaptureTimeSource' });
+
 export enum ChecksumAlgorithm {
   /** sha1 checksum of the whole file contents */
   sha1File = 'sha1',

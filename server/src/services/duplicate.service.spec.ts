@@ -1,7 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
 import { MapAsset } from 'src/dtos/asset-response.dto';
-import { AssetType, AssetVisibility, JobName, JobStatus } from 'src/enum';
+import {
+  AssetProvenance,
+  AssetType,
+  AssetVisibility,
+  CaptureTimeSource,
+  JobName,
+  JobStatus,
+  ProvenanceConfidence,
+} from 'src/enum';
 import { DuplicateService } from 'src/services/duplicate.service';
 import { AssetFactory } from 'test/factories/asset.factory';
 import { authStub } from 'test/fixtures/auth.stub';
@@ -28,6 +36,26 @@ const hasDupe = {
   duplicateId: 'duplicate-id',
 };
 
+const provenanceInfo = (assetId: string, provenance: AssetProvenance) => ({
+  assetId,
+  provenance,
+  confidence: ProvenanceConfidence.High,
+  classifierVersion: 1,
+  captureTimeSource: CaptureTimeSource.EmbeddedExif,
+  captureTimeTag: 'DateTimeOriginal',
+  evidence: [`${provenance} evidence`],
+  software: null,
+  processingSoftware: null,
+  creatorTool: null,
+  documentId: null,
+  originalDocumentId: null,
+  instanceId: null,
+  xmpHistory: null,
+  isRaw: false,
+  originalMimeType: 'image/jpeg',
+  screenshotFilename: null,
+});
+
 describe(DuplicateService.name, () => {
   let sut: DuplicateService;
   let mocks: ServiceMocks;
@@ -41,37 +69,72 @@ describe(DuplicateService.name, () => {
   });
 
   describe('getDuplicates', () => {
-    it('should get duplicates', async () => {
-      const asset = AssetFactory.from().exif().build();
-      mocks.access.duplicate.checkOwnerAccess.mockResolvedValue(new Set(['duplicate-id']));
+    it('returns provenance assessments and keeps a small camera original over a large screenshot', async () => {
+      const captureDate = new Date('2024-01-02T03:04:05.000Z');
+      const original = AssetFactory.from({ width: 1280, height: 960 })
+        .exif({ dateTimeOriginal: captureDate, fileSizeInByte: 500_000 })
+        .build();
+      const screenshot = AssetFactory.from({ width: 2560, height: 1920 }).exif({ fileSizeInByte: 3_000_000 }).build();
       mocks.duplicateRepository.cleanupSingletonGroups.mockResolvedValue();
       mocks.duplicateRepository.getAll.mockResolvedValue([
         {
           duplicateId: 'duplicate-id',
-          assets: [getForDuplicate(asset), getForDuplicate(asset)],
+          assets: [
+            {
+              ...getForDuplicate(screenshot),
+              provenanceInfo: provenanceInfo(screenshot.id, AssetProvenance.Screenshot),
+            },
+            {
+              ...getForDuplicate(original),
+              provenanceInfo: provenanceInfo(original.id, AssetProvenance.CameraOriginal),
+            },
+          ],
         },
       ]);
-      await expect(sut.getDuplicates(authStub.admin)).resolves.toEqual([
-        {
+
+      const result = await sut.getDuplicates(authStub.admin);
+
+      expect(result).toEqual([
+        expect.objectContaining({
           duplicateId: 'duplicate-id',
-          assets: [expect.objectContaining({ id: asset.id }), expect.objectContaining({ id: asset.id })],
-          suggestedKeepAssetIds: [asset.id],
-        },
+          assets: [expect.objectContaining({ id: original.id }), expect.objectContaining({ id: screenshot.id })],
+          suggestedKeepAssetIds: [original.id],
+          autoResolvable: true,
+          groupDate: captureDate.toISOString(),
+          assessments: [
+            expect.objectContaining({ assetId: original.id, recommendedAction: 'keep' }),
+            expect.objectContaining({ assetId: screenshot.id, recommendedAction: 'trash' }),
+          ],
+        }),
       ]);
     });
 
-    it('should return suggestedKeepAssetIds based on file size', async () => {
-      const smallAsset = AssetFactory.from().exif({ fileSizeInByte: 1000 }).build();
-      const largeAsset = AssetFactory.from().exif({ fileSizeInByte: 5000 }).build();
+    it('sorts duplicate groups by the representative original capture date', async () => {
+      const older = AssetFactory.from()
+        .exif({ dateTimeOriginal: new Date('2023-01-01T00:00:00.000Z') })
+        .build();
+      const newer = AssetFactory.from()
+        .exif({ dateTimeOriginal: new Date('2025-01-01T00:00:00.000Z') })
+        .build();
+      const makeGroup = (duplicateId: string, asset: ReturnType<AssetFactory['build']>) => ({
+        duplicateId,
+        assets: [
+          { ...getForDuplicate(asset), provenanceInfo: provenanceInfo(asset.id, AssetProvenance.CameraOriginal) },
+          {
+            ...getForDuplicate(AssetFactory.from().exif().build()),
+            provenanceInfo: provenanceInfo(newUuid(), AssetProvenance.Screenshot),
+          },
+        ],
+      });
       mocks.duplicateRepository.cleanupSingletonGroups.mockResolvedValue();
       mocks.duplicateRepository.getAll.mockResolvedValue([
-        {
-          duplicateId: 'duplicate-id',
-          assets: [getForDuplicate(smallAsset), getForDuplicate(largeAsset)],
-        },
+        makeGroup('older-group', older),
+        makeGroup('newer-group', newer),
       ]);
+
       const result = await sut.getDuplicates(authStub.admin);
-      expect(result[0].suggestedKeepAssetIds).toEqual([largeAsset.id]);
+
+      expect(result.map(({ duplicateId }) => duplicateId)).toEqual(['newer-group', 'older-group']);
     });
   });
 
@@ -231,6 +294,96 @@ describe(DuplicateService.name, () => {
           error: BulkIdErrorReason.NOT_FOUND,
         },
       ]);
+    });
+
+    it('rejects automatic resolution when any candidate is ambiguous', async () => {
+      const original = AssetFactory.from().exif().build();
+      const ambiguous = AssetFactory.from().exif().build();
+      mocks.access.duplicate.checkOwnerAccess.mockResolvedValue(new Set(['group-1']));
+      mocks.duplicateRepository.get.mockResolvedValue({
+        duplicateId: 'group-1',
+        assets: [
+          {
+            ...getForDuplicate(original),
+            provenanceInfo: provenanceInfo(original.id, AssetProvenance.CameraOriginal),
+          },
+          {
+            ...getForDuplicate(ambiguous),
+            provenanceInfo: {
+              ...provenanceInfo(ambiguous.id, AssetProvenance.Unknown),
+              confidence: ProvenanceConfidence.Low,
+            },
+          },
+        ],
+      });
+
+      const result = await sut.resolve(authStub.admin, {
+        groups: [
+          {
+            duplicateId: 'group-1',
+            keepAssetIds: [original.id],
+            trashAssetIds: [ambiguous.id],
+            autoResolve: true,
+          },
+        ],
+      });
+
+      expect(result).toEqual([
+        {
+          id: 'group-1',
+          success: false,
+          error: BulkIdErrorReason.VALIDATION,
+          errorMessage: 'Duplicate group is not safe for automatic resolution',
+        },
+      ]);
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.event.emit).not.toHaveBeenCalled();
+    });
+
+    it('rejects duplicate IDs that omit an expected automatic-resolution candidate', async () => {
+      const original = AssetFactory.from().exif().build();
+      const firstDerived = AssetFactory.from().exif().build();
+      const secondDerived = AssetFactory.from().exif().build();
+      mocks.access.duplicate.checkOwnerAccess.mockResolvedValue(new Set(['group-1']));
+      mocks.duplicateRepository.get.mockResolvedValue({
+        duplicateId: 'group-1',
+        assets: [
+          {
+            ...getForDuplicate(original),
+            provenanceInfo: provenanceInfo(original.id, AssetProvenance.CameraOriginal),
+          },
+          {
+            ...getForDuplicate(firstDerived),
+            provenanceInfo: provenanceInfo(firstDerived.id, AssetProvenance.CameraDerived),
+          },
+          {
+            ...getForDuplicate(secondDerived),
+            provenanceInfo: provenanceInfo(secondDerived.id, AssetProvenance.CameraDerived),
+          },
+        ],
+      });
+
+      const result = await sut.resolve(authStub.admin, {
+        groups: [
+          {
+            duplicateId: 'group-1',
+            keepAssetIds: [original.id],
+            trashAssetIds: [firstDerived.id, firstDerived.id],
+            autoResolve: true,
+          },
+        ],
+      });
+
+      expect(result).toEqual([
+        {
+          id: 'group-1',
+          success: false,
+          error: BulkIdErrorReason.VALIDATION,
+          errorMessage: 'Duplicate group is not safe for automatic resolution',
+        },
+      ]);
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.event.emit).not.toHaveBeenCalled();
     });
 
     it('should skip when keepAssetIds contains non-member', async () => {
